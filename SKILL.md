@@ -58,6 +58,11 @@ If the user is asking about:
 - [ ] Use generated service/client classes instead of handwritten wrappers when available
 - [ ] Validate transport, interceptors, and streaming assumptions against the selected language runtime
 
+If you have direct filesystem access to the target repo, prefer the bundled scripts over rebuilding the command chain by hand:
+
+- `scripts/gen.sh --dir /path/to/repo`
+- `scripts/validate-proto.sh --dir /path/to/repo --against '.git#branch=main'`
+
 ### Output templates
 
 Use these as the default shape for generated guidance:
@@ -108,19 +113,24 @@ Choose protocols in this order:
 
 ## Available Scripts
 
-No bundled scripts yet.
+Use these when working inside a real ConnectRPC repo with a `buf.yaml` workspace.
 
-If repeated tasks emerge across repos, add scripts such as:
+- `scripts/gen.sh`
+  - Purpose: run `buf generate` in a target repo
+  - Use when the user wants code generation, stub refreshes, or a reproducible generation step
+  - Example: `./scripts/gen.sh --dir /path/to/repo`
 
-- `scripts/gen.sh` → wraps `buf generate`
-- `scripts/validate-proto.sh` → runs `buf lint` and `buf breaking`
+- `scripts/validate-proto.sh`
+  - Purpose: run `buf lint`, then `buf breaking`
+  - Use when the user wants schema validation or pre-change safety checks
+  - Example: `./scripts/validate-proto.sh --dir /path/to/repo --against '.git#branch=main'`
 
-If you add scripts later:
+Script behavior:
 
 - keep them non-interactive
 - support `--help`
 - make them idempotent
-- reference them here with relative paths
+- emit JSON to stdout and diagnostics to stderr
 
 ## Troubleshooting
 

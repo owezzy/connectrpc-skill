@@ -37,9 +37,30 @@ references/
   typescript.md       — TypeScript frontend (React + Angular)
   python.md           — Python backend patterns
   buf-tooling.md      — Buf CLI and proto toolchain
+scripts/
+  gen.sh              — portable buf generate helper for a target repo
+  validate-proto.sh   — portable buf lint + breaking helper for a target repo
 evals/
   evals.json          — Starter skill evaluation prompts and assertions
 ```
+
+## Scripts
+
+The skill now ships two portable shell scripts for use against a real ConnectRPC repository:
+
+```bash
+./scripts/gen.sh --help
+./scripts/validate-proto.sh --help
+```
+
+Examples:
+
+```bash
+./scripts/gen.sh --dir /path/to/repo
+./scripts/validate-proto.sh --dir /path/to/repo --against '.git#branch=main'
+```
+
+They are non-interactive, idempotent, and emit JSON to stdout so an agent can call them safely.
 
 ## Evaluation
 
