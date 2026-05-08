@@ -1,19 +1,33 @@
 # ConnectRPC Python Backend Reference
 
-> **Status**: Beta (v0.10.0). Package renamed from `connect-python` to `connectrpc` in v0.9.0.
-> **Requires**: Python >= 3.10
+> **Status**: Beta. Keep examples conservative and prefer generated classes from `*_connect.py`.
+> **Recommended path**: Async ASGI service + generated client/server classes.
+
+## Defaults
+
+- Treat Python as a **beta / constrained** ConnectRPC track
+- Prefer **ASGI** for new services
+- Generate `*_pb2.py`, `*_pb2.pyi`, and `*_connect.py`
+- Use generated application/client classes from `*_connect.py`
+- Do not present Python as feature-equivalent to the Go stack unless verified for your specific protocol/runtime path
 
 ## Installation
 
 ```bash
 pip install connectrpc
-# Or with extras
-pip install connectrpc[grpc]          # gRPC protocol support
-pip install connectrpc[otel]          # OpenTelemetry tracing
-pip install connectrpc[grpc,otel]     # both
+```
+
+Optional extras:
+
+```bash
+pip install connectrpc[grpc]
+pip install connectrpc[otel]
+pip install connectrpc[grpc,otel]
 ```
 
 ## Code Generation
+
+Use Buf to generate protobuf types, type hints, and ConnectRPC service/client wrappers.
 
 ```yaml
 # buf.gen.yaml
@@ -21,231 +35,233 @@ version: v2
 plugins:
   - remote: buf.build/protocolbuffers/python
     out: gen/python
-  # For gRPC stubs (optional)
-  - remote: buf.build/grpc/python
+  - remote: buf.build/protocolbuffers/pyi
+    out: gen/python
+  - remote: buf.build/connectrpc/python
     out: gen/python
 ```
+
+Run generation:
 
 ```bash
 buf generate
 ```
 
-## ASGI Service (async, recommended)
+Generated output typically looks like:
 
-```python
-# server.py
-import connectrpc
-from gen.myapp.v1 import user_pb2, user_pb2_grpc
-
-class UserServicer(user_pb2_grpc.UserServiceServicer):
-    async def GetUser(self, request, context):
-        if not request.id:
-            raise connectrpc.ConnectError(
-                code=connectrpc.Code.INVALID_ARGUMENT,
-                message="id is required",
-            )
-        return user_pb2.GetUserResponse(
-            user=user_pb2.User(id=request.id, name="Alice")
-        )
-
-    async def ListUsers(self, request, context):
-        """Server streaming"""
-        for user in get_users(page_size=request.page_size):
-            yield user_pb2.ListUsersResponse(user=user)
-
-# Create ASGI app
-app = connectrpc.App(
-    services=[UserServicer()],
-    # Optional configuration
-    interceptors=[logging_interceptor, auth_interceptor],
-)
-
-# Run with uvicorn
-# uvicorn server:app --host 0.0.0.0 --port 8080
+```text
+gen/python/
+  user_pb2.py
+  user_pb2.pyi
+  user_connect.py
 ```
 
-## WSGI Service (sync)
+## Async ASGI Service (recommended)
 
 ```python
-import connectrpc
+from connectrpc.request import RequestContext
+from gen.python.user_pb2 import GetUserRequest, GetUserResponse
+from gen.python.user_connect import UserService, UserServiceASGIApplication
 
-class UserServicer(user_pb2_grpc.UserServiceServicer):
-    def GetUser(self, request, context):
-        return user_pb2.GetUserResponse(
-            user=user_pb2.User(id=request.id, name="Alice")
-        )
 
-# Create WSGI app
-app = connectrpc.WSGIApp(services=[UserServicer()])
+class UserServiceImpl(UserService):
+    async def get_user(self, request: GetUserRequest, ctx: RequestContext) -> GetUserResponse:
+        return GetUserResponse(message=f"Hello, {request.id}")
 
-# Run with gunicorn
-# gunicorn server:app --bind 0.0.0.0:8080
+
+app = UserServiceASGIApplication(UserServiceImpl())
+
+# Run with uvicorn or hypercorn
+# uvicorn server:app --port 8080
+```
+
+## Sync WSGI Service
+
+Use this only when you need a synchronous deployment model.
+
+```python
+from typing import Iterator
+
+from connectrpc.request import RequestContext
+from gen.python.user_pb2 import GetUserRequest, GetUserResponse, ListUsersResponse
+from gen.python.user_connect import UserService, UserServiceWSGIApplication
+
+
+class UserServiceSync(UserService):
+    def get_user(self, request: GetUserRequest, ctx: RequestContext) -> GetUserResponse:
+        return GetUserResponse(message=f"Hello, {request.id}")
+
+    def list_users(self, request: GetUserRequest, ctx: RequestContext) -> Iterator[ListUsersResponse]:
+        yield ListUsersResponse(message="Alice")
+        yield ListUsersResponse(message="Bob")
+
+
+app = UserServiceWSGIApplication(UserServiceSync())
+
+# gunicorn server:app
+```
+
+## Async Client
+
+Prefer the generated client class from `*_connect.py`.
+
+```python
+from gen.python.user_pb2 import GetUserRequest
+from gen.python.user_connect import UserServiceClient
+
+
+async def main() -> None:
+    async with UserServiceClient("https://api.example.com") as client:
+        response = await client.get_user(GetUserRequest(id="123"))
+        print(response.message)
+```
+
+### Advanced async client options
+
+When you need protocol or codec control, generated clients accept extra options.
+
+```python
+from connectrpc.code import Code
+from connectrpc.codec import proto_json_codec
+from connectrpc.compression.brotli import BrotliCompression
+from connectrpc.errors import ConnectError
+from connectrpc.protocol import ProtocolType
+from gen.python.user_pb2 import GetUserRequest
+from gen.python.user_connect import UserServiceClient
+
+
+async def main() -> None:
+    async with UserServiceClient(
+        "https://api.example.com",
+        protocol=ProtocolType.CONNECT,
+        codec=proto_json_codec(),
+        timeout_ms=5_000,
+        accept_compression=[BrotliCompression()],
+    ) as client:
+        try:
+            response = await client.get_user(GetUserRequest(id="123"))
+            print(response.message)
+        except ConnectError as err:
+            if err.code == Code.DEADLINE_EXCEEDED:
+                print("timed out")
+            else:
+                print(f"RPC error [{err.code}]: {err.message}")
 ```
 
 ## Error Handling
 
 ```python
-import connectrpc
+from connectrpc.code import Code
+from connectrpc.errors import ConnectError
 
-# Raise errors with codes
-raise connectrpc.ConnectError(
-    code=connectrpc.Code.NOT_FOUND,
-    message=f"User {request.id} not found",
-)
+raise ConnectError(Code.INVALID_ARGUMENT, "id is required")
+raise ConnectError(Code.NOT_FOUND, "user not found")
+raise ConnectError(Code.PERMISSION_DENIED, "insufficient permissions")
+```
 
-raise connectrpc.ConnectError(
-    code=connectrpc.Code.PERMISSION_DENIED,
-    message="Insufficient permissions",
-)
+With error details:
 
-# With error details (protobuf messages)
+```python
 from google.rpc import error_details_pb2
+from connectrpc.code import Code
+from connectrpc.errors import ConnectError
 
 detail = error_details_pb2.ErrorInfo(
     reason="USER_NOT_FOUND",
     domain="myapp.v1",
     metadata={"user_id": request.id},
 )
-raise connectrpc.ConnectError(
-    code=connectrpc.Code.NOT_FOUND,
-    message="User not found",
-    details=[detail],
-)
 
-# Available codes
-connectrpc.Code.OK
-connectrpc.Code.CANCELLED
-connectrpc.Code.UNKNOWN
-connectrpc.Code.INVALID_ARGUMENT
-connectrpc.Code.NOT_FOUND
-connectrpc.Code.ALREADY_EXISTS
-connectrpc.Code.PERMISSION_DENIED
-connectrpc.Code.UNAUTHENTICATED
-connectrpc.Code.RESOURCE_EXHAUSTED
-connectrpc.Code.FAILED_PRECONDITION
-connectrpc.Code.UNIMPLEMENTED
-connectrpc.Code.INTERNAL
-connectrpc.Code.UNAVAILABLE
-connectrpc.Code.DATA_LOSS
+raise ConnectError(Code.NOT_FOUND, "user not found", details=[detail])
+```
+
+## Request Context
+
+Use `RequestContext` for metadata, timeouts, and response headers/trailers.
+
+```python
+from connectrpc.request import RequestContext
+
+
+async def get_user(self, request, ctx: RequestContext):
+    auth = ctx.request_headers().get("authorization", "")
+    ctx.response_headers().add("x-request-id", "req-001")
+    return ...
 ```
 
 ## Interceptors
 
+Start with lightweight metadata interceptors. Only move to full unary interceptors when you need request/response interception.
+
 ```python
-import connectrpc
-from typing import Any, Callable
+from connectrpc.request import RequestContext
+from connectrpc.errors import ConnectError
+from connectrpc.code import Code
 
-# Unary interceptor
-async def auth_interceptor(
-    request: Any,
-    context: connectrpc.ServiceContext,
-    handler: Callable,
-) -> Any:
-    token = context.request_headers.get("authorization", "")
-    if not token.startswith("Bearer "):
-        raise connectrpc.ConnectError(
-            code=connectrpc.Code.UNAUTHENTICATED,
-            message="Missing bearer token",
-        )
-    claims = validate_token(token.removeprefix("Bearer "))
-    context.set("user_claims", claims)
-    return await handler(request, context)
 
-# Logging interceptor
-async def logging_interceptor(
-    request: Any,
-    context: connectrpc.ServiceContext,
-    handler: Callable,
-) -> Any:
-    import time
-    start = time.monotonic()
-    try:
-        response = await handler(request, context)
-        duration = time.monotonic() - start
-        logger.info(f"{context.method}: {duration:.3f}s")
-        return response
-    except Exception as e:
-        duration = time.monotonic() - start
-        logger.error(f"{context.method}: {duration:.3f}s error={e}")
-        raise
+class LoggingInterceptor:
+    async def on_start(self, ctx: RequestContext) -> None:
+        print(f"Handling {ctx.method().name} request")
 
-# Apply interceptors (order matters: first = outermost)
-app = connectrpc.App(
-    services=[UserServicer()],
-    interceptors=[logging_interceptor, auth_interceptor],
+    async def on_end(self, token: None, ctx: RequestContext, error: Exception | None) -> None:
+        if error:
+            print(f"Failed {ctx.method().name}: {error}")
+
+
+class AuthInterceptor:
+    async def intercept_unary(self, call_next, request, ctx: RequestContext):
+        token = ctx.request_headers().get("authorization", "")
+        if not token.startswith("Bearer "):
+            raise ConnectError(Code.UNAUTHENTICATED, "missing bearer token")
+        return await call_next(request, ctx)
+
+
+app = UserServiceASGIApplication(
+    UserServiceImpl(),
+    interceptors=[LoggingInterceptor(), AuthInterceptor()],
 )
 ```
 
-## OpenTelemetry Integration
+## OpenTelemetry
 
 ```python
-pip install connectrpc[otel]
+from connectrpc_otel import OpenTelemetryInterceptor
+from gen.python.user_connect import UserServiceASGIApplication
 
-from connectrpc.otel import OtelInterceptor
-from opentelemetry import trace
-from opentelemetry.sdk.trace import TracerProvider
-
-trace.set_tracer_provider(TracerProvider())
-
-app = connectrpc.App(
-    services=[UserServicer()],
-    interceptors=[OtelInterceptor()],
+app = UserServiceASGIApplication(
+    UserServiceImpl(),
+    interceptors=[OpenTelemetryInterceptor()],
 )
 ```
 
-## Python Client
+## FastAPI / Starlette Mounting
 
-```python
-import connectrpc
-from gen.myapp.v1 import user_pb2, user_pb2_grpc
-
-# Create client
-async with connectrpc.AsyncClient(
-    base_url="http://localhost:8080",
-) as client:
-    stub = user_pb2_grpc.UserServiceStub(client)
-    response = await stub.GetUser(user_pb2.GetUserRequest(id="123"))
-    print(response.user.name)
-```
-
-## Framework Integration
-
-### FastAPI Mount
+Mount the generated ASGI application into a larger app when needed.
 
 ```python
 from fastapi import FastAPI
-from connectrpc import App as ConnectApp
+from gen.python.user_connect import UserServiceASGIApplication
 
 fastapi_app = FastAPI()
-connect_app = ConnectApp(services=[UserServicer()])
+connect_app = UserServiceASGIApplication(UserServiceImpl())
 
-# Mount ConnectRPC under /connect prefix
-fastapi_app.mount("/connect", connect_app)
-
-# Or mount at root (ConnectRPC handles its own routing)
 fastapi_app.mount("/", connect_app)
-```
-
-### Starlette
-
-```python
-from starlette.applications import Starlette
-from starlette.routing import Mount
-
-app = Starlette(routes=[
-    Mount("/", connect_app),
-])
 ```
 
 ## Testing
 
+Prefer ASGI-level tests around the generated application class.
+
 ```python
 import pytest
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
+from gen.python.user_connect import UserServiceASGIApplication
+
 
 @pytest.fixture
 def app():
-    return connectrpc.App(services=[UserServicer()])
+    return UserServiceASGIApplication(UserServiceImpl())
+
 
 @pytest.mark.asyncio
 async def test_get_user(app):
@@ -257,6 +273,11 @@ async def test_get_user(app):
             headers={"Content-Type": "application/json"},
         )
         assert response.status_code == 200
-        data = response.json()
-        assert data["user"]["name"] == "Alice"
 ```
+
+## Python-Specific Gotchas
+
+- Keep the beta label explicit in the skill.
+- Prefer generated `*_connect.py` classes over hand-rolled generic wrappers.
+- Keep examples conservative and exact; avoid inventing convenience APIs.
+- If you need a deeply customized runtime path, verify it against the current upstream README before teaching it.

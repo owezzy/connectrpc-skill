@@ -197,6 +197,10 @@ path, handler := myappv1connect.NewUserServiceHandler(
 )
 ```
 
+`connect.UnaryInterceptorFunc` is the right default for **unary RPCs**.
+
+If your service also exposes **streaming RPCs**, do not assume this helper covers everything you need. Implement the full interceptor interface for streaming-aware auth, logging, or metrics instead of relying on unary-only middleware.
+
 ## Server Setup
 
 ```go
@@ -205,7 +209,10 @@ func main() {
 
     // Register services
     userPath, userHandler := myappv1connect.NewUserServiceHandler(&UserServer{},
-        connect.WithInterceptors(interceptors...),
+        connect.WithInterceptors(
+            validate.NewInterceptor(),
+            interceptors..., 
+        ),
     )
     mux.Handle(userPath, userHandler)
 
@@ -237,6 +244,8 @@ func main() {
     server.ListenAndServe()
 }
 ```
+
+Validation via `connectrpc.com/validate` is a strong default for new Go services. Prefer it over ad hoc request validation when your schemas already express the contract.
 
 ## Go Client
 
