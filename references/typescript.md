@@ -1,63 +1,139 @@
 # ConnectRPC TypeScript Frontend Reference
 
+## Defaults
+
+- Use **Connect-ES v2** patterns
+- Use `createClient()` from `@connectrpc/connect` — **not** `createPromiseClient()`
+- Import services from generated `*_pb` files — **not** `*_connect`
+- Use `createConnectTransport()` as the default browser transport
+- Add Connect-Query only when you actually want TanStack Query integration
+- Create the transport once and reuse it across the app
+
 ## Packages
 
 | Package | Purpose |
 |---|---|
-| `@connectrpc/connect` | Core: client creation, interceptors, errors |
-| `@connectrpc/connect-web` | Browser transports (Connect + gRPC-Web) |
-| `@connectrpc/connect-node` | Node.js transports (Connect + gRPC + gRPC-Web) |
-| `@connectrpc/connect-query` | TanStack Query integration (React) |
-| `@bufbuild/protobuf` | Protobuf-ES runtime (required) |
-| `@bufbuild/protoc-gen-es` | Protobuf codegen plugin |
-| `@connectrpc/protoc-gen-connect-es` | Connect service codegen plugin |
+| `@connectrpc/connect` | Core client, errors, interceptors |
+| `@connectrpc/connect-web` | Browser transports for Connect and gRPC-Web |
+| `@connectrpc/connect-node` | Node.js transports for Connect, gRPC, and gRPC-Web |
+| `@connectrpc/connect-query` | TanStack Query runtime integration |
+| `@bufbuild/protobuf` | Protobuf-ES runtime |
+| `@bufbuild/protoc-gen-es` | Generates `*_pb.ts` files |
+| `@connectrpc/protoc-gen-connect-query` | Optional plugin for `*_connectquery.ts` helpers |
+|
 
-## Transport Setup
+## Code Generation
+
+### Core Connect-ES v2 generation
+
+Use Buf v2 with `buf.build/bufbuild/es`. This generates messages **and** service definitions into `*_pb.ts`.
+
+```yaml
+# buf.gen.yaml
+version: v2
+plugins:
+  - remote: buf.build/bufbuild/es
+    out: src/gen
+    opt: target=ts
+```
+
+Generated output looks like:
+
+```text
+src/gen/
+  user_pb.ts
+```
+
+The service definition is imported from the same generated file:
 
 ```typescript
-import { createConnectTransport, createGrpcWebTransport } from "@connectrpc/connect-web";
+import { UserService } from "./gen/user_pb";
+```
 
-// Connect protocol (recommended for new projects)
+### Optional Connect-Query generation
+
+If you use TanStack Query, add the query generator as a **local** plugin:
+
+```yaml
+# buf.gen.yaml
+version: v2
+plugins:
+  - remote: buf.build/bufbuild/es
+    out: src/gen
+    opt: target=ts
+  - local: protoc-gen-connect-query
+    out: src/gen
+    opt: target=ts
+```
+
+Install the plugin and runtime:
+
+```bash
+npm install --save-dev @bufbuild/protoc-gen-es @connectrpc/protoc-gen-connect-query
+npm install @connectrpc/connect-query @tanstack/react-query @bufbuild/protobuf
+```
+
+Generated output then includes method helpers like:
+
+```text
+src/gen/
+  user_pb.ts
+  user-UserService_connectquery.ts
+```
+
+## Browser Client (default)
+
+```typescript
+import { createClient } from "@connectrpc/connect";
+import { createConnectTransport } from "@connectrpc/connect-web";
+import { UserService } from "./gen/user_pb";
+
 const transport = createConnectTransport({
-  baseUrl: "http://localhost:8080",
-  // Optional: interceptors, credentials, JSON format
+  baseUrl: "https://api.example.com",
+  defaultTimeoutMs: 5000,
+  // useBinaryFormat: true, // opt in later if you need smaller payloads
+  // useHttpGet: true,      // only for side-effect-free unary RPCs
 });
 
-// gRPC-Web protocol (for existing gRPC backends)
-const grpcTransport = createGrpcWebTransport({
-  baseUrl: "http://localhost:8080",
-});
+const client = createClient(UserService, transport);
+
+const response = await client.getUser(
+  { id: "123" },
+  {
+    headers: { authorization: "Bearer token" },
+  },
+);
+
+console.log(response.user?.name);
 ```
 
-## Client Creation
+### When to use gRPC-Web
+
+Use `createGrpcWebTransport()` only when the backend does **not** support the Connect protocol and you must talk to an existing gRPC-Web endpoint.
 
 ```typescript
-import { createPromiseClient, createCallbackClient } from "@connectrpc/connect";
-import { UserService } from "./gen/myapp/v1/user_connect";
+import { createClient } from "@connectrpc/connect";
+import { createGrpcWebTransport } from "@connectrpc/connect-web";
+import { UserService } from "./gen/user_pb";
 
-// Promise-based (most common)
-const client = createPromiseClient(UserService, transport);
-const res = await client.getUser({ id: "123" });
-console.log(res.user?.name);
+const transport = createGrpcWebTransport({
+  baseUrl: "https://grpc-web.example.com",
+});
 
-// With headers
-const res = await client.getUser(
-  { id: "123" },
-  { headers: new Headers({ Authorization: "Bearer token" }) },
-);
+const client = createClient(UserService, transport);
 ```
 
-## React + connect-query (TanStack Query)
+## React with Connect-Query
 
-### Setup
+### App setup
 
 ```tsx
-// main.tsx
-import { TransportProvider } from "@connectrpc/connect-query";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { TransportProvider } from "@connectrpc/connect-query";
+import { createConnectTransport } from "@connectrpc/connect-web";
 
-const transport = createConnectTransport({ baseUrl: "/api" });
 const queryClient = new QueryClient();
+const transport = createConnectTransport({ baseUrl: "/api" });
 
 root.render(
   <TransportProvider transport={transport}>
@@ -68,96 +144,82 @@ root.render(
 );
 ```
 
-### Queries
+### Unary query
 
 ```tsx
 import { useQuery } from "@connectrpc/connect-query";
-import { getUser } from "./gen/myapp/v1/user-UserService_connectquery";
+import { getUser } from "./gen/user-UserService_connectquery";
 
 function UserProfile({ id }: { id: string }) {
   const { data, isLoading, error } = useQuery(getUser, { id });
 
   if (isLoading) return <Spinner />;
-  if (error) return <Error error={error} />;
+  if (error) return <ErrorView error={error} />;
   return <div>{data?.user?.name}</div>;
 }
 ```
 
-### Mutations
+### Mutation
 
 ```tsx
 import { useMutation } from "@connectrpc/connect-query";
-import { createUser } from "./gen/myapp/v1/user-UserService_connectquery";
+import { createUser } from "./gen/user-UserService_connectquery";
 
 function CreateUserForm() {
   const mutation = useMutation(createUser);
 
-  const handleSubmit = (name: string) => {
-    mutation.mutate({ name }, {
-      onSuccess: (data) => console.log("Created:", data.user?.id),
-    });
+  const onSubmit = (name: string) => {
+    mutation.mutate({ name });
   };
 
   return <form onSubmit={...}>...</form>;
 }
 ```
 
-### Infinite Queries (pagination)
+## Angular Integration (manual DI)
 
-```tsx
-import { useInfiniteQuery } from "@connectrpc/connect-query";
-import { listUsers } from "./gen/myapp/v1/user-UserService_connectquery";
+There is no official Angular adapter. Use Angular DI for a singleton transport and client.
 
-function UserList() {
-  const { data, fetchNextPage, hasNextPage } = useInfiniteQuery(
-    listUsers,
-    { pageSize: 20 },
-    {
-      pageParamKey: "pageToken",
-      getNextPageParam: (lastPage) => lastPage.nextPageToken || undefined,
-    }
-  );
-  // ...
-}
-```
-
-## Angular Integration (Manual DI)
-
-No official Angular adapter exists. Use manual dependency injection:
-
-### Transport Service
+### Transport service
 
 ```typescript
-// services/transport.service.ts
-import { Injectable } from '@angular/core';
-import { createConnectTransport } from '@connectrpc/connect-web';
-import { environment } from '../environments/environment';
+import { Injectable } from "@angular/core";
+import { createConnectTransport } from "@connectrpc/connect-web";
+import type { Interceptor } from "@connectrpc/connect";
+import { environment } from "../environments/environment";
 
-@Injectable({ providedIn: 'root' })
+const authInterceptor: Interceptor = (next) => async (req) => {
+  const token = localStorage.getItem("token");
+  if (token) {
+    req.header.set("Authorization", `Bearer ${token}`);
+  }
+  return next(req);
+};
+
+@Injectable({ providedIn: "root" })
 export class TransportService {
   readonly transport = createConnectTransport({
     baseUrl: environment.apiUrl,
-    interceptors: [authInterceptor],  // optional
+    interceptors: [authInterceptor],
   });
 }
 ```
 
-### RPC Service
+### RPC service
 
 ```typescript
-// services/user.service.ts
-import { Injectable } from '@angular/core';
-import { createPromiseClient, PromiseClient } from '@connectrpc/connect';
-import { UserService as UserServiceDef } from '../gen/myapp/v1/user_connect';
-import { TransportService } from './transport.service';
-import { from, Observable } from 'rxjs';
+import { Injectable } from "@angular/core";
+import { createClient, type Client } from "@connectrpc/connect";
+import { from, type Observable } from "rxjs";
+import { UserService, type GetUserResponse, type ListUsersResponse } from "../gen/user_pb";
+import { TransportService } from "./transport.service";
 
-@Injectable({ providedIn: 'root' })
-export class UserService {
-  private client: PromiseClient<typeof UserServiceDef>;
+@Injectable({ providedIn: "root" })
+export class UserRpcService {
+  private readonly client: Client<typeof UserService>;
 
-  constructor(private transportService: TransportService) {
-    this.client = createPromiseClient(UserServiceDef, this.transportService.transport);
+  constructor(transportService: TransportService) {
+    this.client = createClient(UserService, transportService.transport);
   }
 
   getUser(id: string): Observable<GetUserResponse> {
@@ -170,67 +232,11 @@ export class UserService {
 }
 ```
 
-### Component Usage
+## Interceptors and Error Handling
 
 ```typescript
-// components/user-profile.component.ts
-@Component({
-  selector: 'app-user-profile',
-  template: `
-    @if (user$ | async; as user) {
-      <h2>{{ user.user?.name }}</h2>
-      <p>{{ user.user?.email }}</p>
-    }
-  `,
-})
-export class UserProfileComponent implements OnInit {
-  user$!: Observable<GetUserResponse>;
+import { ConnectError, Code, type Interceptor } from "@connectrpc/connect";
 
-  constructor(private userService: UserService) {}
-
-  ngOnInit() {
-    this.user$ = this.userService.getUser(this.userId);
-  }
-}
-```
-
-### Signal-based (Angular 16+)
-
-```typescript
-@Component({
-  selector: 'app-user-profile',
-  template: `
-    @if (user()) {
-      <h2>{{ user()!.user?.name }}</h2>
-    }
-  `,
-})
-export class UserProfileComponent {
-  private userService = inject(UserService);
-  userId = input.required<string>();
-  user = toSignal(
-    toObservable(this.userId).pipe(
-      switchMap(id => this.userService.getUser(id))
-    )
-  );
-}
-```
-
-## Interceptors (Client-side)
-
-```typescript
-import type { Interceptor } from "@connectrpc/connect";
-
-// Auth interceptor
-const authInterceptor: Interceptor = (next) => async (req) => {
-  const token = getAuthToken();
-  if (token) {
-    req.header.set("Authorization", `Bearer ${token}`);
-  }
-  return next(req);
-};
-
-// Logging interceptor
 const loggingInterceptor: Interceptor = (next) => async (req) => {
   const start = performance.now();
   try {
@@ -238,25 +244,13 @@ const loggingInterceptor: Interceptor = (next) => async (req) => {
     console.log(`${req.method.name}: ${(performance.now() - start).toFixed(0)}ms`);
     return res;
   } catch (err) {
-    console.error(`${req.method.name} failed:`, err);
+    console.error(`${req.method.name} failed`, err);
     throw err;
   }
 };
 
-// Apply to transport
-const transport = createConnectTransport({
-  baseUrl: "/api",
-  interceptors: [authInterceptor, loggingInterceptor],
-});
-```
-
-## Error Handling
-
-```typescript
-import { ConnectError, Code } from "@connectrpc/connect";
-
 try {
-  const res = await client.getUser({ id: "123" });
+  await client.getUser({ id: "123" });
 } catch (err) {
   if (err instanceof ConnectError) {
     switch (err.code) {
@@ -272,39 +266,20 @@ try {
       default:
         showGenericError(err.message);
     }
-    // Access error details
-    for (const detail of err.details) {
-      console.log(detail.type, detail.value);
-    }
   }
 }
 ```
 
-## Server Streaming (Browser)
+## Streaming and Protocol Gotchas
 
-```typescript
-// Only server streaming works in browsers (no client/bidi streaming)
-for await (const res of client.listUsers({ pageSize: 10 })) {
-  console.log(res.user);
-}
-```
+- Browsers can reliably do **server streaming**. Do not assume client or bidi streaming in browser UIs.
+- Use the Connect protocol by default. Reach for gRPC-Web only for compatibility with existing infrastructure.
+- Keep the transport singleton-scoped. Creating a new transport per render is wasteful and complicates caching/interceptors.
+- Prefer JSON format while debugging in the browser. Add `useBinaryFormat: true` later if payload size matters.
 
-## Node.js Server (connect-node)
+## Avoid These Stale Patterns
 
-```typescript
-import { createConnectRouter } from "@connectrpc/connect";
-import { connectNodeAdapter } from "@connectrpc/connect-node";
-import { UserService } from "./gen/myapp/v1/user_connect";
-
-const router = createConnectRouter().service(UserService, {
-  async getUser(req) {
-    return { user: { id: req.id, name: "Alice" } };
-  },
-});
-
-// Express
-app.use(connectNodeAdapter({ routes: router }));
-
-// Fastify
-await fastify.register(fastifyConnectPlugin, { routes: router });
-```
+- `createPromiseClient()` → replaced by `createClient()`
+- `import { UserService } from "./user_connect"` → import from `./user_pb`
+- `buf.build/connectrpc/es` in `buf.gen.yaml` → remove it for Connect-ES v2
+- Treating Connect-Query as mandatory → it is optional and only needed with TanStack Query

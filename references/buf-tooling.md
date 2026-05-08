@@ -88,11 +88,8 @@ plugins:
     out: gen/go
     opt: paths=source_relative
 
-  # ─── TypeScript ───
+  # ─── TypeScript (Connect-ES v2) ───
   - remote: buf.build/bufbuild/es
-    out: gen/ts
-    opt: target=ts
-  - remote: buf.build/connectrpc/es
     out: gen/ts
     opt: target=ts
 
@@ -103,8 +100,8 @@ plugins:
   # - remote: buf.build/grpc/python
   #   out: gen/python
 
-  # ─── connect-query (React TanStack Query) ───
-  # - remote: buf.build/connectrpc/query-es
+  # ─── connect-query (optional, local plugin) ───
+  # - local: protoc-gen-connect-query
   #   out: gen/ts
   #   opt: target=ts
 ```
@@ -115,9 +112,8 @@ plugins:
 |---|---|
 | `protocolbuffers/go` | `paths=source_relative` — flat output structure |
 | `connectrpc/go` | `paths=source_relative` — generates `_connect.go` files |
-| `bufbuild/es` | `target=ts` (TS), `target=js+dts` (JS + declarations) |
-| `connectrpc/es` | `target=ts` — generates service definitions |
-| `connectrpc/query-es` | `target=ts` — generates TanStack Query hooks |
+| `bufbuild/es` | `target=ts` (TS), `target=js+dts` (JS + declarations); generates messages and service definitions into `*_pb.ts` |
+| `protoc-gen-connect-query` | `target=ts` — optional local plugin for TanStack Query helpers in `*_connectquery.ts` |
 
 ### Local Plugins (alternative to remote)
 
@@ -130,6 +126,12 @@ plugins:
       - npx
       - -y
       - @bufbuild/protoc-gen-es
+    out: gen/ts
+    opt: target=ts
+  - local:
+      - npx
+      - -y
+      - @connectrpc/protoc-gen-connect-query
     out: gen/ts
     opt: target=ts
 ```
