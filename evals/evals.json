@@ -1,0 +1,37 @@
+{
+  "evals": [
+    {
+      "name": "generate-go-handler-from-proto",
+      "prompt": "I have a ConnectRPC proto for a UserService and need a Go server handler with Buf v2 generation guidance, validation, and default transport advice.",
+      "expected_output": "A Go-oriented answer that uses Buf v2, Connect protocol defaults, generated handlers, and validation guidance.",
+      "assertions": [
+        "Mentions Buf v2 configuration or generation",
+        "Uses Connect as the default transport choice",
+        "Mentions generated Go handlers or connect-go generated code",
+        "Mentions validation or validate.NewInterceptor for Go"
+      ]
+    },
+    {
+      "name": "react-client-with-connect-query",
+      "prompt": "Show me how to call a ConnectRPC service from a React app using TanStack Query and explain what codegen I need.",
+      "expected_output": "A TypeScript/React answer using Connect-ES v2 patterns, optional Connect-Query setup, and current code generation guidance.",
+      "assertions": [
+        "Uses createClient rather than createPromiseClient",
+        "References *_pb imports for Connect-ES v2",
+        "Treats Connect-Query as optional and tied to TanStack Query",
+        "Does not recommend buf.build/connectrpc/es for core TS generation"
+      ]
+    },
+    {
+      "name": "python-beta-constraints",
+      "prompt": "I need a Python ConnectRPC backend example and want to know any caveats before I adopt it.",
+      "expected_output": "A Python answer that uses generated *_connect.py classes, calls out beta status, and keeps the runtime guidance conservative.",
+      "assertions": [
+        "Explicitly mentions Python beta or constrained status",
+        "Uses generated *_connect.py application or client classes",
+        "Avoids hand-wavy generic App or AsyncClient helpers if not verified",
+        "Includes a practical caveat about Python runtime or protocol support"
+      ]
+    }
+  ]
+}
