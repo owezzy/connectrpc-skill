@@ -1,8 +1,9 @@
 ---
 name: connectrpc
-description: Build type-safe RPC services with ConnectRPC across Go, Python, and TypeScript (Angular/React). Use when building ConnectRPC/Connect services, protobuf-based APIs, or buf-managed projects. Trigger phrases include "connectrpc", "connect-go", "connect-es", "buf generate", "protobuf service", "grpc-web", "connect-query".
+description: Use this skill when building, configuring, or debugging ConnectRPC services and clients across Go, Python, and TypeScript, including Buf-based protobuf generation, Connect vs gRPC-Web transport choices, interceptors, and cross-language RPC workflows. Trigger on prompts involving connect-go, connect-es, connect-query, connect-python, buf generate, protobuf services, grpc-web, or Connect-compatible RPC APIs.
+license: MIT
 metadata:
-  version: 1.0.0
+  version: 1.1.0
   author: Owen Adirah
   tags:
     - grpc
@@ -19,37 +20,47 @@ metadata:
 
 # ConnectRPC
 
----
+Use this skill to build or fix **proto-first RPC workflows** with ConnectRPC. Default to **Connect protocol + Buf v2 + generated clients/servers**, then load the language-specific reference you need.
+
+## When to Use
+
+Use this skill when:
+
+- wiring a new ConnectRPC service from `.proto` files
+- generating Go, TypeScript, or Python stubs with Buf
+- deciding between Connect, gRPC, and gRPC-Web
+- adding Connect clients to React or Angular apps
+- implementing ConnectRPC handlers, interceptors, or error handling
+- debugging transport, streaming, CORS, or code generation issues
+
+## Choose the Right Reference
+
+Read only the reference file that matches the task:
+
+- **Go backend** → `references/go.md`
+- **TypeScript frontend or Node integration** → `references/typescript.md`
+- **Python backend** → `references/python.md`
+- **Buf config, linting, breaking checks, generation** → `references/buf-tooling.md`
+
+If the user is asking about:
+
+- **transport choice** → start here, then load `references/typescript.md` or `references/go.md`
+- **Python runtime details** → load `references/python.md` immediately
+- **generated file names/import paths** → load `references/typescript.md` or `references/python.md`
+- **schema/tooling problems** → load `references/buf-tooling.md`
 
 ## Core Workflow
 
-### 1. Proto-First Design
+- [ ] Define or update the `.proto` schema first
+- [ ] Use **Buf v2** for linting, breaking checks, and code generation
+- [ ] Generate only the targets needed by the project
+- [ ] Pick **Connect protocol** as the default transport unless compatibility requires otherwise
+- [ ] Use generated service/client classes instead of handwritten wrappers when available
+- [ ] Validate transport, interceptors, and streaming assumptions against the selected language runtime
 
-All ConnectRPC services start with `.proto` files:
+### Output templates
 
-```protobuf
-syntax = "proto3";
-package myapp.v1;
-
-service UserService {
-  rpc GetUser(GetUserRequest) returns (GetUserResponse) {}
-  rpc ListUsers(ListUsersRequest) returns (stream ListUsersResponse) {}
-}
-
-message GetUserRequest {
-  string id = 1;
-}
-message GetUserResponse {
-  User user = 1;
-}
-message User {
-  string id = 1;
-  string name = 2;
-  string email = 3;
-}
-```
-
-### 2. Code Generation with Buf
+Use these as the default shape for generated guidance:
 
 ```yaml
 # buf.yaml
@@ -64,198 +75,73 @@ breaking:
     - FILE
 ```
 
-```yaml
-# buf.gen.yaml — polyglot config
-version: v2
-plugins:
-  # Go backend
-  - remote: buf.build/connectrpc/go
-    out: gen/go
-    opt: paths=source_relative
-  - remote: buf.build/protocolbuffers/go
-    out: gen/go
-    opt: paths=source_relative
-  # TypeScript frontend
-  - remote: buf.build/bufbuild/es
-    out: gen/ts
-    opt: target=ts
-  - remote: buf.build/connectrpc/es
-    out: gen/ts
-    opt: target=ts
-  # Python backend
-  - remote: buf.build/protocolbuffers/python
-    out: gen/python
-```
-
 ```bash
-buf generate   # generates all targets
-buf lint        # lint protos
-buf breaking --against '.git#branch=main'  # check breaking changes
+buf lint
+buf breaking --against '.git#branch=main'
+buf generate
 ```
 
-### 3. Backend Implementation
+## Protocol Selection
 
-#### Go (Primary — see `references/go.md`)
+Choose protocols in this order:
 
-```go
-package main
+1. **Connect** — default for new work
+   - works well in browsers and server-to-server flows
+   - easiest to debug when using JSON format
 
-import (
-    "context"
-    "net/http"
-    "golang.org/x/net/http2"
-    "golang.org/x/net/http2/h2c"
-    "connectrpc.com/connect"
-    userv1 "example/gen/go/myapp/v1"
-    "example/gen/go/myapp/v1/myappv1connect"
-)
+2. **gRPC-Web** — compatibility path
+   - use only when the backend does not support Connect protocol
+   - browser-friendly, but more constrained
 
-type UserServer struct{}
+3. **gRPC** — interop path
+   - use for existing gRPC-only systems or server-to-server requirements
+   - requires stricter HTTP/2 assumptions
 
-func (s *UserServer) GetUser(
-    ctx context.Context,
-    req *connect.Request[userv1.GetUserRequest],
-) (*connect.Response[userv1.GetUserResponse], error) {
-    if req.Msg.Id == "" {
-        return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("id required"))
-    }
-    return connect.NewResponse(&userv1.GetUserResponse{
-        User: &userv1.User{Id: req.Msg.Id, Name: "Alice"},
-    }), nil
-}
+## Gotchas
 
-func main() {
-    mux := http.NewServeMux()
-    path, handler := myappv1connect.NewUserServiceHandler(&UserServer{})
-    mux.Handle(path, handler)
-    http.ListenAndServe(":8080", h2c.NewHandler(mux, &http2.Server{}))
-}
-```
+- **TypeScript examples must use current Connect-ES v2 patterns**: `createClient()` and service imports from `*_pb` files
+- **Connect-Query is optional**: only use it when the app already benefits from TanStack Query
+- **Browsers are not a full streaming environment**: treat server streaming as the reliable browser case
+- **Python is a beta / constrained track**: prefer generated `*_connect.py` classes and conservative examples
+- **CORS is HTTP middleware work, not interceptor work**
+- **Buf v2 is the default**: avoid older `buf.work.yaml` or stale codegen instructions
 
-#### Python (Beta — see `references/python.md`)
+## Available Scripts
 
-```python
-import connectrpc
-from gen.myapp.v1 import user_pb2
+No bundled scripts yet.
 
-class UserService:
-    async def get_user(self, request, context):
-        return user_pb2.GetUserResponse(
-            user=user_pb2.User(id=request.id, name="Alice")
-        )
+If repeated tasks emerge across repos, add scripts such as:
 
-# ASGI app
-app = connectrpc.create_app(services=[UserService()])
-# Run: uvicorn main:app
-```
+- `scripts/gen.sh` → wraps `buf generate`
+- `scripts/validate-proto.sh` → runs `buf lint` and `buf breaking`
 
-### 4. Frontend Implementation
+If you add scripts later:
 
-#### TypeScript/React with connect-query (see `references/typescript.md`)
+- keep them non-interactive
+- support `--help`
+- make them idempotent
+- reference them here with relative paths
 
-```typescript
-import { createConnectTransport } from "@connectrpc/connect-web";
-import { TransportProvider } from "@connectrpc/connect-query";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useQuery } from "@connectrpc/connect-query";
-import { getUser } from "./gen/myapp/v1/user-UserService_connectquery";
+## Troubleshooting
 
-const transport = createConnectTransport({ baseUrl: "http://localhost:8080" });
-const queryClient = new QueryClient();
+- **TS imports look wrong** → load `references/typescript.md` and verify `*_pb` vs `*_connectquery` imports
+- **Python example surface seems unfamiliar** → load `references/python.md` and stick to generated classes from `*_connect.py`
+- **Browser calls fail with metadata or trailer issues** → check CORS and exposed headers in the server setup
+- **Streaming behaves oddly** → verify whether the client/runtime actually supports the stream type you are using
+- **Buf generation drifts across languages** → load `references/buf-tooling.md` and verify plugin setup target-by-target
 
-// Wrap app
-<TransportProvider transport={transport}>
-  <QueryClientProvider client={queryClient}>
-    <App />
-  </QueryClientProvider>
-</TransportProvider>
+## Best Defaults
 
-// In component
-function UserProfile({ id }: { id: string }) {
-  const { data } = useQuery(getUser, { id });
-  return <div>{data?.user?.name}</div>;
-}
-```
-
-#### Angular (Manual DI — see `references/typescript.md`)
-
-```typescript
-// transport.service.ts
-@Injectable({ providedIn: 'root' })
-export class TransportService {
-  readonly transport = createConnectTransport({
-    baseUrl: environment.apiUrl,
-  });
-}
-
-// user.service.ts
-@Injectable({ providedIn: 'root' })
-export class UserService {
-  private client: PromiseClient<typeof UserServiceDef>;
-  constructor(private transportService: TransportService) {
-    this.client = createPromiseClient(UserServiceDef, this.transportService.transport);
-  }
-  getUser(id: string) {
-    return from(this.client.getUser({ id }));
-  }
-}
-```
-
----
-
-## Key Patterns
-
-### Error Handling
-- Use `connect.CodeXxx` constants (Go) or `ConnectError` (TS) — maps to gRPC codes
-- Common: `CodeNotFound`, `CodeInvalidArgument`, `CodeUnauthenticated`, `CodePermissionDenied`
-- Attach details: `connect.NewError(code, err)` with `detail, _ := connect.NewErrorDetail(msg)`
-
-### Interceptors (Middleware)
-- Go: `connect.UnaryInterceptorFunc(func(next connect.UnaryFunc) connect.UnaryFunc { ... })`
-- TS: `Interceptor` type — `(next) => async (req) => { /* before */ const res = await next(req); /* after */ return res; }`
-- Python: similar interceptor chain pattern
-
-### Streaming
-- **Server streaming**: handler receives request, sends via `stream.Send()`
-- **Client streaming**: handler reads via `stream.Receive()` in loop
-- **Bidi streaming**: both send/receive concurrently
-- Web browsers: only server streaming supported (via connect protocol, not gRPC-Web)
-
-### Protocol Support
-- Connect protocol (default): HTTP/1.1 + HTTP/2, JSON + Protobuf, works with curl
-- gRPC protocol: full gRPC compatibility, requires HTTP/2
-- gRPC-Web: browser-compatible, HTTP/1.1 OK
-- Clients auto-negotiate; servers handle all three simultaneously
-
----
+- **Schema management**: Buf v2
+- **Go server**: generated handler + validation interceptor + standard `net/http`
+- **TS browser client**: `createConnectTransport()` + `createClient()`
+- **TS query layer**: add `@connectrpc/connect-query` only when using TanStack Query
+- **Python server**: generated ASGI application from `*_connect.py`
+- **Error handling**: language-native Connect error types with explicit codes
 
 ## Reference Docs
 
-For detailed patterns, see:
-- `references/go.md` — Go backend: handlers, interceptors, streaming, testing, project structure
-- `references/typescript.md` — TypeScript: connect-es, connect-web, connect-query, Angular DI, React hooks
-- `references/python.md` — Python backend: ASGI/WSGI, codegen, interceptors, OpenTelemetry
-- `references/buf-tooling.md` — Buf CLI: lint rules, breaking changes, BSR, polyglot generation
-
----
-
-## Quick Reference
-
-| Package | Install | Purpose |
-|---|---|---|
-| `connectrpc.com/connect` | `go get` | Go server + client |
-| `@connectrpc/connect` | `npm i` | TS/JS core |
-| `@connectrpc/connect-web` | `npm i` | Browser transport |
-| `@connectrpc/connect-query` | `npm i` | TanStack Query integration |
-| `@bufbuild/protobuf` | `npm i` | TS protobuf runtime |
-| `connectrpc` | `pip install` | Python (>=3.10, beta) |
-| `buf` | `brew install bufbuild/buf/buf` | Proto toolchain |
-
-## Common Commands
-
-```bash
-buf generate                              # generate all code
-buf lint                                  # lint protos
-buf breaking --against '.git#branch=main' # check breaking changes
-buf curl http://localhost:8080 --data '{"id":"1"}' --schema proto myapp.v1.UserService/GetUser  # test
-```
+- `references/go.md` — Go handlers, interceptors, validation, streaming, testing
+- `references/typescript.md` — Connect-ES v2, React, Angular, Connect-Query, stale-pattern warnings
+- `references/python.md` — generated ASGI/WSGI apps, generated clients, RequestContext, beta-safe patterns
+- `references/buf-tooling.md` — Buf v2 config, generation, breaking checks, managed mode, CI
