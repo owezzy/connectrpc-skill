@@ -3,7 +3,7 @@ name: connectrpc
 description: Use this skill when building, configuring, or debugging ConnectRPC services and clients across Go, Python, and TypeScript, including Buf-based protobuf generation, Connect vs gRPC-Web transport choices, interceptors, and cross-language RPC workflows. Trigger on prompts involving connect-go, connect-es, connect-query, connect-python, buf generate, protobuf services, grpc-web, or Connect-compatible RPC APIs.
 license: MIT
 metadata:
-  version: 1.1.0
+  version: 1.2.0
   author: Owen Adirah
   tags:
     - grpc
@@ -38,13 +38,15 @@ Use this skill when:
 Read only the reference file that matches the task:
 
 - **Go backend** → `references/go.md`
-- **TypeScript frontend or Node integration** → `references/typescript.md`
+- **TypeScript browser clients (React, Angular, Connect-Query)** → `references/typescript.md`
+- **TypeScript Node.js servers and testing** → `references/nodejs-server.md`
 - **Python backend** → `references/python.md`
 - **Buf config, linting, breaking checks, generation** → `references/buf-tooling.md`
 
 If the user is asking about:
 
-- **transport choice** → start here, then load `references/typescript.md` or `references/go.md`
+- **transport choice** → start here, then load `references/typescript.md`, `references/nodejs-server.md`, or `references/go.md`
+- **Node.js handlers, adapters, CORS, or testing** → load `references/nodejs-server.md` immediately
 - **Python runtime details** → load `references/python.md` immediately
 - **generated file names/import paths** → load `references/typescript.md` or `references/python.md`
 - **schema/tooling problems** → load `references/buf-tooling.md`
@@ -56,6 +58,7 @@ If the user is asking about:
 - [ ] Generate only the targets needed by the project
 - [ ] Pick **Connect protocol** as the default transport unless compatibility requires otherwise
 - [ ] Use generated service/client classes instead of handwritten wrappers when available
+- [ ] Prefer the official **three-tier testing model**: in-memory transport, full HTTP server, direct handler unit test
 - [ ] Validate transport, interceptors, and streaming assumptions against the selected language runtime
 
 If you have direct filesystem access to the target repo, prefer the bundled scripts over rebuilding the command chain by hand:
@@ -106,7 +109,9 @@ Choose protocols in this order:
 
 - **TypeScript examples must use current Connect-ES v2 patterns**: `createClient()` and service imports from `*_pb` files
 - **Connect-Query is optional**: only use it when the app already benefits from TanStack Query
-- **Browsers are not a full streaming environment**: treat server streaming as the reliable browser case
+- **Browsers are not a full streaming environment**: treat **server streaming** as the reliable browser case and do not assume client or bidi streaming in browser UIs
+- **Angular examples should follow the official DI/token pattern**: provider-backed transport + `ObservableClient<T>` wrapper, not ad-hoc `from(client.method())` services
+- **Node.js guidance should mirror the official adapters**: `connectNodeAdapter()` for vanilla HTTP, framework middleware/plugins for Express or Fastify
 - **Python is a beta / constrained track**: prefer generated `*_connect.py` classes and conservative examples
 - **CORS is HTTP middleware work, not interceptor work**
 - **Buf v2 is the default**: avoid older `buf.work.yaml` or stale codegen instructions
@@ -135,6 +140,7 @@ Script behavior:
 ## Troubleshooting
 
 - **TS imports look wrong** → load `references/typescript.md` and verify `*_pb` vs `*_connectquery` imports
+- **Node.js handlers or tests feel clumsy** → load `references/nodejs-server.md` and match the official adapter + three-tier testing setup
 - **Python example surface seems unfamiliar** → load `references/python.md` and stick to generated classes from `*_connect.py`
 - **Browser calls fail with metadata or trailer issues** → check CORS and exposed headers in the server setup
 - **Streaming behaves oddly** → verify whether the client/runtime actually supports the stream type you are using
@@ -145,13 +151,16 @@ Script behavior:
 - **Schema management**: Buf v2
 - **Go server**: generated handler + validation interceptor + standard `net/http`
 - **TS browser client**: `createConnectTransport()` + `createClient()`
+- **TS Node server**: `ConnectRouter` + framework adapter/middleware + explicit CORS constants
 - **TS query layer**: add `@connectrpc/connect-query` only when using TanStack Query
 - **Python server**: generated ASGI application from `*_connect.py`
 - **Error handling**: language-native Connect error types with explicit codes
+- **Testing**: `createRouterTransport()` for fast tests, `setupTestServer()` for HTTP integration
 
 ## Reference Docs
 
 - `references/go.md` — Go handlers, interceptors, validation, streaming, testing
-- `references/typescript.md` — Connect-ES v2, React, Angular, Connect-Query, stale-pattern warnings
+- `references/typescript.md` — Connect-ES v2 browser clients, React, Angular, Connect-Query, headers, browser streaming limits
+- `references/nodejs-server.md` — `ConnectRouter`, Node adapters, Express middleware, CORS, testing, context values
 - `references/python.md` — generated ASGI/WSGI apps, generated clients, RequestContext, beta-safe patterns
 - `references/buf-tooling.md` — Buf v2 config, generation, breaking checks, managed mode, CI

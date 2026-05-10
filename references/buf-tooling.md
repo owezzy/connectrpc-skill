@@ -72,6 +72,9 @@ lint:
 
 ```yaml
 version: v2
+clean: true
+inputs:
+  - directory: proto
 managed:
   enabled: true
   override:
@@ -89,21 +92,58 @@ plugins:
     opt: paths=source_relative
 
   # ─── TypeScript (Connect-ES v2) ───
-  - remote: buf.build/bufbuild/es
+  - local: protoc-gen-es
     out: gen/ts
-    opt: target=ts
+    opt:
+      - target=ts
 
   # ─── Python ───
   - remote: buf.build/protocolbuffers/python
     out: gen/python
-  # Optional: gRPC Python stubs
-  # - remote: buf.build/grpc/python
-  #   out: gen/python
+  - remote: buf.build/protocolbuffers/pyi
+    out: gen/python
+  - remote: buf.build/connectrpc/python
+    out: gen/python
 
   # ─── connect-query (optional, local plugin) ───
   # - local: protoc-gen-connect-query
   #   out: gen/ts
-  #   opt: target=ts
+  #   opt:
+  #     - target=ts
+```
+
+### TypeScript-only configuration matching the official examples
+
+The official Connect-ES examples use a **local** `protoc-gen-es` plugin plus `clean: true` so stale generated files are removed before regeneration. Prefer that pattern unless you specifically need remote plugins in CI.
+
+```yaml
+version: v2
+clean: true
+inputs:
+  - directory: proto
+plugins:
+  - local: protoc-gen-es
+    out: src/gen
+    opt:
+      - target=ts
+```
+
+Add connect-query only when the app actually uses TanStack Query:
+
+```yaml
+version: v2
+clean: true
+inputs:
+  - directory: proto
+plugins:
+  - local: protoc-gen-es
+    out: src/gen
+    opt:
+      - target=ts
+  - local: protoc-gen-connect-query
+    out: src/gen
+    opt:
+      - target=ts
 ```
 
 ### Plugin Options
@@ -112,7 +152,7 @@ plugins:
 |---|---|
 | `protocolbuffers/go` | `paths=source_relative` — flat output structure |
 | `connectrpc/go` | `paths=source_relative` — generates `_connect.go` files |
-| `bufbuild/es` | `target=ts` (TS), `target=js+dts` (JS + declarations); generates messages and service definitions into `*_pb.ts` |
+| `protoc-gen-es` | `target=ts` (TS), `target=js+dts` (JS + declarations); generates messages and service definitions into `*_pb.ts` |
 | `protoc-gen-connect-query` | `target=ts` — optional local plugin for TanStack Query helpers in `*_connectquery.ts` |
 
 ### Local Plugins (alternative to remote)
@@ -127,13 +167,15 @@ plugins:
       - -y
       - @bufbuild/protoc-gen-es
     out: gen/ts
-    opt: target=ts
+    opt:
+      - target=ts
   - local:
       - npx
       - -y
       - @connectrpc/protoc-gen-connect-query
     out: gen/ts
-    opt: target=ts
+    opt:
+      - target=ts
 ```
 
 ## Common Commands
@@ -218,7 +260,7 @@ buf breaking --against 'buf.build/myorg/myapis:v1'
 
 ## Project Structure (Polyglot)
 
-```
+```text
 project/
 ├── buf.yaml                    # module config
 ├── buf.gen.yaml                # codegen config
@@ -273,3 +315,17 @@ managed:
 ```
 
 This eliminates `option go_package = "..."` from your proto files.
+
+### When to use managed mode
+
+Use managed mode when:
+
+- you own multiple modules and want Buf to standardize generated package options
+- you want to remove repetitive language-specific file options from `.proto` files
+- you are generating for Go or Java and need consistent package prefixes
+
+Skip or limit managed mode when:
+
+- the repo already relies on hand-authored per-file options
+- a dependency requires explicit package options that differ from your defaults
+- you only need a small TypeScript-only setup and managed mode adds noise without solving a real problem

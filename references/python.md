@@ -194,6 +194,7 @@ async def get_user(self, request, ctx: RequestContext):
 Start with lightweight metadata interceptors. Only move to full unary interceptors when you need request/response interception.
 
 ```python
+from connectrpc.interceptor import MetadataInterceptor, UnaryInterceptor
 from connectrpc.request import RequestContext
 from connectrpc.errors import ConnectError
 from connectrpc.code import Code
