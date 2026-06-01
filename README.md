@@ -1,6 +1,6 @@
 # ConnectRPC Skill
 
-[![Install Count](https://skills.sh/badge/owezzy/connectrpc-skill)](https://skills.sh/owezzy/connectrpc-skill)
+[![skills.sh](https://skills.sh/b/owezzy/connectrpc-skill)](https://skills.sh/owezzy/connectrpc-skill)
 
 Build, configure, and debug ConnectRPC services and clients across Go, Python, and TypeScript (React/Angular), with Buf-based protobuf generation and practical guidance for transport choice, interceptors, and cross-language RPC workflows.
 
