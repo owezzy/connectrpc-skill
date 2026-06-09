@@ -4,25 +4,25 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: ./scripts/gen.sh --dir <repo-path> [--buf-cmd <command>]
+Usage: ./scripts/gen.sh --dir <repo-path> [--buf-bin <path>]
 
 Runs `buf generate` for a target ConnectRPC repo.
 
 Options:
   --dir <repo-path>     Target repository containing buf.yaml (required)
-  --buf-cmd <command>   Override buf invocation (default: auto-detect)
+  --buf-bin <path>      Override buf binary path or name (default: auto-detect)
   --help                Show this help message
 
 Behavior:
-  - prefers installed `buf`
-  - falls back to `go run github.com/bufbuild/buf/cmd/buf@v1.47.2`
+  - requires an installed `buf` binary
+  - does not execute shell command strings
   - prints JSON to stdout
   - prints diagnostics to stderr
 EOF
 }
 
 REPO_DIR=""
-BUF_CMD=""
+BUF_BIN=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -30,8 +30,8 @@ while [[ $# -gt 0 ]]; do
       REPO_DIR="${2:-}"
       shift 2
       ;;
-    --buf-cmd)
-      BUF_CMD="${2:-}"
+    --buf-bin)
+      BUF_BIN="${2:-}"
       shift 2
       ;;
     --help|-h)
@@ -62,21 +62,31 @@ if [[ ! -f "$REPO_DIR/buf.yaml" ]]; then
   exit 2
 fi
 
-if [[ -z "$BUF_CMD" ]]; then
+REPO_DIR=$(cd "$REPO_DIR" && pwd -P)
+
+if [[ -z "$BUF_BIN" ]]; then
   if command -v buf >/dev/null 2>&1; then
-    BUF_CMD="buf"
-  elif command -v go >/dev/null 2>&1; then
-    BUF_CMD="go run github.com/bufbuild/buf/cmd/buf@v1.47.2"
+    BUF_BIN="buf"
   else
-    echo "Neither buf nor go is available. Install buf or Go." >&2
+    echo "buf is not available. Install the Buf CLI and retry." >&2
     exit 3
   fi
+fi
+
+if [[ "$BUF_BIN" == *[[:space:]]* ]]; then
+  echo "--buf-bin must be a single executable path or command name, not a shell command string." >&2
+  exit 2
+fi
+
+if ! command -v "$BUF_BIN" >/dev/null 2>&1; then
+  echo "buf binary is not executable or not on PATH: $BUF_BIN" >&2
+  exit 3
 fi
 
 START_TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 TMP_OUTPUT=$(mktemp)
 
-if (cd "$REPO_DIR" && eval "$BUF_CMD generate") >"$TMP_OUTPUT" 2> >(tee /dev/stderr >&2); then
+if (cd "$REPO_DIR" && "$BUF_BIN" generate) >"$TMP_OUTPUT" 2> >(tee /dev/stderr >&2); then
   STATUS="ok"
   EXIT_CODE=0
 else
@@ -101,7 +111,7 @@ import json, sys
 print(json.dumps(sys.argv[1]))
 PY
 )"
-printf '  "command": %s,\n' "$(python3 - <<'PY' "$BUF_CMD generate"
+printf '  "command": %s,\n' "$(python3 - <<'PY' "$BUF_BIN generate"
 import json, sys
 print(json.dumps(sys.argv[1]))
 PY

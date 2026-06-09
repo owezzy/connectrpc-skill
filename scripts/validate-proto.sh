@@ -4,19 +4,19 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: ./scripts/validate-proto.sh --dir <repo-path> [--against <baseline>] [--buf-cmd <command>]
+Usage: ./scripts/validate-proto.sh --dir <repo-path> [--against <baseline>] [--buf-bin <path>]
 
 Runs `buf lint` and `buf breaking` for a target ConnectRPC repo.
 
 Options:
   --dir <repo-path>      Target repository containing buf.yaml (required)
   --against <baseline>   Baseline for buf breaking (default: .git#branch=main)
-  --buf-cmd <command>    Override buf invocation (default: auto-detect)
+  --buf-bin <path>       Override buf binary path or name (default: auto-detect)
   --help                 Show this help message
 
 Behavior:
-  - prefers installed `buf`
-  - falls back to `go run github.com/bufbuild/buf/cmd/buf@v1.47.2`
+  - requires an installed `buf` binary
+  - does not execute shell command strings
   - prints JSON to stdout
   - prints diagnostics to stderr
 EOF
@@ -24,7 +24,7 @@ EOF
 
 REPO_DIR=""
 AGAINST=".git#branch=main"
-BUF_CMD=""
+BUF_BIN=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -36,8 +36,8 @@ while [[ $# -gt 0 ]]; do
       AGAINST="${2:-}"
       shift 2
       ;;
-    --buf-cmd)
-      BUF_CMD="${2:-}"
+    --buf-bin)
+      BUF_BIN="${2:-}"
       shift 2
       ;;
     --help|-h)
@@ -68,26 +68,40 @@ if [[ ! -f "$REPO_DIR/buf.yaml" ]]; then
   exit 2
 fi
 
-if [[ -z "$BUF_CMD" ]]; then
+REPO_DIR=$(cd "$REPO_DIR" && pwd -P)
+
+if [[ -z "$BUF_BIN" ]]; then
   if command -v buf >/dev/null 2>&1; then
-    BUF_CMD="buf"
-  elif command -v go >/dev/null 2>&1; then
-    BUF_CMD="go run github.com/bufbuild/buf/cmd/buf@v1.47.2"
+    BUF_BIN="buf"
   else
-    echo "Neither buf nor go is available. Install buf or Go." >&2
+    echo "buf is not available. Install the Buf CLI and retry." >&2
     exit 3
   fi
 fi
 
+if [[ "$BUF_BIN" == *[[:space:]]* ]]; then
+  echo "--buf-bin must be a single executable path or command name, not a shell command string." >&2
+  exit 2
+fi
+
+if ! command -v "$BUF_BIN" >/dev/null 2>&1; then
+  echo "buf binary is not executable or not on PATH: $BUF_BIN" >&2
+  exit 3
+fi
+
 run_step() {
   local step_name="$1"
-  local command="$2"
-  local stdout_file stderr_file status exit_code stdout_json stderr_json
+  shift
+  local command_display stdout_file stderr_file status exit_code stdout_json stderr_json
+  local command=("$@")
+
+  command_display=$(printf '%q ' "${command[@]}")
+  command_display=${command_display% }
 
   stdout_file=$(mktemp)
   stderr_file=$(mktemp)
 
-  if (cd "$REPO_DIR" && eval "$command") >"$stdout_file" 2>"$stderr_file"; then
+  if (cd "$REPO_DIR" && "${command[@]}") >"$stdout_file" 2>"$stderr_file"; then
     status="ok"
     exit_code=0
   else
@@ -118,7 +132,7 @@ import json, sys
 print(json.dumps(sys.argv[1]))
 PY
 )"
-  printf '      "command": %s,\n' "$(python3 - <<'PY' "$command"
+  printf '      "command": %s,\n' "$(python3 - <<'PY' "$command_display"
 import json, sys
 print(json.dumps(sys.argv[1]))
 PY
@@ -134,10 +148,10 @@ PY
 
 START_TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-LINT_RESULT=$(run_step "lint" "$BUF_CMD lint") || LINT_EXIT=$?
+LINT_RESULT=$(run_step "lint" "$BUF_BIN" lint) || LINT_EXIT=$?
 LINT_EXIT=${LINT_EXIT:-0}
 
-BREAKING_RESULT=$(run_step "breaking" "$BUF_CMD breaking --against '$AGAINST'") || BREAKING_EXIT=$?
+BREAKING_RESULT=$(run_step "breaking" "$BUF_BIN" breaking --against "$AGAINST") || BREAKING_EXIT=$?
 BREAKING_EXIT=${BREAKING_EXIT:-0}
 
 if [[ "$LINT_EXIT" -eq 0 && "$BREAKING_EXIT" -eq 0 ]]; then
