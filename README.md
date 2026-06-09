@@ -62,6 +62,8 @@ Examples:
 
 They are non-interactive, idempotent, and emit JSON to stdout so an agent can call them safely.
 
+Security note: the scripts treat target repositories and `.proto` files as untrusted data. They require a trusted, already-installed `buf` binary and do not parse shell command strings or run network-based execution fallbacks.
+
 ## Evaluation
 
 This repo includes a starter evaluation file:
