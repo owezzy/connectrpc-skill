@@ -1,1 +1,7 @@
 .idea
+.env
+.env.*
+*.key
+*.pem
+secrets/
+.aws/
