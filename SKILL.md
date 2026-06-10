@@ -3,7 +3,7 @@ name: connectrpc
 description: Use this skill when building, configuring, or debugging ConnectRPC services and clients across Go, Python, and TypeScript, including Buf-based protobuf generation, Connect vs gRPC-Web transport choices, interceptors, and cross-language RPC workflows. Trigger on prompts involving connect-go, connect-es, connect-query, connect-python, buf generate, protobuf services, grpc-web, or Connect-compatible RPC APIs.
 license: MIT
 metadata:
-  version: 1.2.0
+  version: 1.2.1
   author: Owen Adirah
   tags:
     - grpc
